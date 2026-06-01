@@ -423,10 +423,6 @@ function InputView({
     setFileMeta(null); setUploadStatus("idle"); setUploadMsg(""); setUploadErr(""); setUploadProgress(0);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
-  const _noop = () => {
-    setFileMeta(null); setUploadStatus("idle"); setUploadMsg(""); setUploadErr("");
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  };
 
   const charCount = syllabus.length;
   const estMinutes = Math.max(1, Math.round(charCount / 2500));
