@@ -287,9 +287,126 @@ function Header() {
 
 /* ---------------- Input View ---------------- */
 
+const PDFJS_SRC = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+const PDFJS_WORKER = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+
+function loadPdfJs(): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const w = window as any;
+    if (w.pdfjsLib) {
+      w.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
+      return resolve(w.pdfjsLib);
+    }
+    const existing = document.querySelector(`script[src="${PDFJS_SRC}"]`) as HTMLScriptElement | null;
+    const onReady = () => {
+      if (w.pdfjsLib) {
+        w.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
+        resolve(w.pdfjsLib);
+      } else reject(new Error("pdfjs failed to load"));
+    };
+    if (existing) { existing.addEventListener("load", onReady); existing.addEventListener("error", () => reject(new Error("pdfjs load error"))); return; }
+    const s = document.createElement("script");
+    s.src = PDFJS_SRC; s.async = true;
+    s.onload = onReady;
+    s.onerror = () => reject(new Error("pdfjs load error"));
+    document.head.appendChild(s);
+  });
+}
+
+function formatBytes(n: number) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(2)} MB`;
+}
+
 function InputView({
   syllabus, setSyllabus, tone, setTone, depth, setDepth, difficulty, setDifficulty, onGenerate,
 }: any) {
+  const [mode, setMode] = useState<"paste" | "upload">("paste");
+  const [dragOver, setDragOver] = useState(false);
+  const [fileMeta, setFileMeta] = useState<{ name: string; size: number; type: string } | null>(null);
+  const [uploadStatus, setUploadStatus] = useState<"idle" | "reading" | "done" | "error">("idle");
+  const [uploadMsg, setUploadMsg] = useState("");
+  const [uploadErr, setUploadErr] = useState("");
+  const [textJustExtracted, setTextJustExtracted] = useState(false);
+  const [recent, setRecent] = useState<{ name: string; size: number; type: string; text: string }[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    try {
+      const r = JSON.parse(localStorage.getItem("kalyx_recent_files") || "[]");
+      if (Array.isArray(r)) setRecent(r.slice(0, 3));
+    } catch {}
+  }, []);
+
+  const saveRecent = (entry: { name: string; size: number; type: string; text: string }) => {
+    const next = [entry, ...recent.filter((r) => r.name !== entry.name)].slice(0, 3);
+    setRecent(next);
+    try { localStorage.setItem("kalyx_recent_files", JSON.stringify(next)); } catch {}
+  };
+
+  const applyExtracted = (text: string, meta: { name: string; size: number; type: string }, persist = true) => {
+    setSyllabus(text);
+    setUploadStatus("done");
+    setUploadMsg("Text extracted successfully ✅");
+    setTextJustExtracted(true);
+    setTimeout(() => setTextJustExtracted(false), 1600);
+    if (persist) saveRecent({ ...meta, text });
+  };
+
+  const processFile = async (file: File) => {
+    setUploadErr("");
+    const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+    const isTxt = file.type === "text/plain" || /\.txt$/i.test(file.name);
+    if (!isPdf && !isTxt) {
+      setUploadStatus("error"); setUploadErr("Only PDF and TXT files supported"); return;
+    }
+    if (file.size > MAX_FILE_BYTES) {
+      setUploadStatus("error"); setUploadErr("File too large — maximum 10 MB"); return;
+    }
+    const meta = { name: file.name, size: file.size, type: isPdf ? "pdf" : "txt" };
+    setFileMeta(meta);
+    setUploadStatus("reading");
+    setUploadMsg("Reading file...");
+    try {
+      if (isTxt) {
+        const text = await file.text();
+        applyExtracted(text, meta);
+      } else {
+        const pdfjs = await loadPdfJs();
+        const buf = await file.arrayBuffer();
+        const pdf = await pdfjs.getDocument({ data: buf }).promise;
+        const total = pdf.numPages;
+        let full = "";
+        for (let p = 1; p <= total; p++) {
+          setUploadMsg(`Extracting text from page ${p} of ${total}...`);
+          const page = await pdf.getPage(p);
+          const content = await page.getTextContent();
+          const str = content.items.map((it: any) => it.str).join(" ");
+          full += str + "\n\n";
+        }
+        applyExtracted(full.trim(), meta);
+      }
+    } catch (e: any) {
+      setUploadStatus("error");
+      setUploadErr(e?.message || "Failed to read file");
+    }
+  };
+
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault(); setDragOver(false);
+    const f = e.dataTransfer.files?.[0]; if (f) processFile(f);
+  };
+
+  const clearFile = () => {
+    setFileMeta(null); setUploadStatus("idle"); setUploadMsg(""); setUploadErr("");
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const charCount = syllabus.length;
+  const estMinutes = Math.max(1, Math.round(charCount / 2500));
+
   return (
     <div className="kx-fadeup">
       <div style={{ textAlign: "center", marginBottom: 48 }}>
@@ -317,20 +434,189 @@ function InputView({
         boxShadow: "0 20px 60px -20px rgba(14,165,233,0.25), 0 0 0 1px rgba(14,165,233,0.05) inset",
         position: "relative",
       }}>
-        <Label>Paste Your Syllabus</Label>
+        {/* Tabs */}
+        <div style={{ display: "flex", gap: 8, marginBottom: 22, borderBottom: `1px solid ${C.border}` }}>
+          {[
+            { id: "paste", label: "📝 Type or Paste" },
+            { id: "upload", label: "📎 Upload File" },
+          ].map((t) => {
+            const active = mode === t.id;
+            return (
+              <button
+                key={t.id}
+                onClick={() => setMode(t.id as any)}
+                style={{
+                  position: "relative", background: "transparent", border: "none",
+                  color: active ? C.text : C.muted, fontFamily: FONT, fontSize: 14, fontWeight: 600,
+                  padding: "12px 18px", cursor: "pointer", transition: "color 0.25s ease",
+                }}
+              >
+                {t.label}
+                <span style={{
+                  position: "absolute", left: 12, right: 12, bottom: -1, height: 2,
+                  background: GRAD_PRIMARY, borderRadius: 2,
+                  transform: active ? "scaleX(1)" : "scaleX(0)", transformOrigin: "left",
+                  transition: "transform 0.3s cubic-bezier(0.4,0,0.2,1)",
+                }} />
+              </button>
+            );
+          })}
+        </div>
+
+        {mode === "upload" && (
+          <div style={{ marginBottom: 20 }}>
+            <div
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={onDrop}
+              style={{
+                position: "relative",
+                background: dragOver ? "rgba(14,165,233,0.1)" : C.inset,
+                borderRadius: 16, padding: 40, textAlign: "center",
+                border: dragOver ? `2px solid ${C.blue}` : "2px dashed transparent",
+                backgroundImage: dragOver
+                  ? undefined
+                  : `linear-gradient(${C.inset}, ${C.inset}), ${GRAD_PRIMARY}`,
+                backgroundOrigin: "border-box",
+                backgroundClip: dragOver ? undefined : "padding-box, border-box",
+                boxShadow: dragOver ? "0 0 30px rgba(14,165,233,0.4)" : "none",
+                transition: "all 0.25s ease",
+              }}
+            >
+              {!fileMeta && (
+                <>
+                  <div className="kx-float" style={{ fontSize: 56, lineHeight: 1, transform: dragOver ? "scale(1.15)" : "scale(1)", transition: "transform 0.2s" }}>📤</div>
+                  <div style={{ marginTop: 18, fontSize: 18, fontWeight: 700, color: C.text }}>
+                    {dragOver ? "Drop it here!" : "Drag & drop your syllabus file here"}
+                  </div>
+                  <div style={{ marginTop: 6, fontSize: 13, color: C.muted }}>Supports PDF and TXT files (max 10 MB)</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "20px auto", maxWidth: 320 }}>
+                    <div style={{ flex: 1, height: 1, background: "linear-gradient(90deg, transparent, rgba(14,165,233,0.4), transparent)" }} />
+                    <span style={{ color: C.muted, fontSize: 12, fontWeight: 600 }}>OR</span>
+                    <div style={{ flex: 1, height: 1, background: "linear-gradient(90deg, transparent, rgba(139,92,246,0.4), transparent)" }} />
+                  </div>
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    style={{
+                      padding: "10px 22px", borderRadius: 10, cursor: "pointer", fontFamily: FONT,
+                      fontSize: 14, fontWeight: 600, color: C.text, background: C.inset,
+                      backgroundImage: `linear-gradient(${C.inset}, ${C.inset}), ${GRAD_PRIMARY}`,
+                      backgroundOrigin: "border-box", backgroundClip: "padding-box, border-box",
+                      border: "2px solid transparent", transition: "transform 0.15s ease",
+                    }}
+                  >
+                    Browse Files
+                  </button>
+                </>
+              )}
+
+              {fileMeta && (
+                <div style={{ display: "flex", alignItems: "center", gap: 16, textAlign: "left" }}>
+                  <div style={{
+                    width: 52, height: 52, borderRadius: 12,
+                    background: fileMeta.type === "pdf" ? "rgba(239,68,68,0.15)" : "rgba(14,165,233,0.15)",
+                    color: fileMeta.type === "pdf" ? C.red : C.blue,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 11, fontWeight: 800, letterSpacing: "0.05em",
+                    border: `1px solid ${fileMeta.type === "pdf" ? "rgba(239,68,68,0.35)" : "rgba(14,165,233,0.35)"}`,
+                  }}>
+                    {fileMeta.type.toUpperCase()}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ color: C.text, fontWeight: 600, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {fileMeta.name}
+                    </div>
+                    <div style={{ color: C.muted, fontSize: 12, marginTop: 2 }}>
+                      {formatBytes(fileMeta.size)}
+                      {uploadStatus === "reading" && <> · <span style={{ color: C.blue }}>{uploadMsg}</span></>}
+                      {uploadStatus === "done" && <> · <span style={{ color: C.emerald }}>{uploadMsg}</span></>}
+                    </div>
+                  </div>
+                  {uploadStatus === "done" && (
+                    <div style={{ color: C.emerald, fontSize: 22, animation: "kxPop 0.4s ease" }}>✓</div>
+                  )}
+                  <button
+                    onClick={clearFile}
+                    style={{ background: "transparent", border: `1px solid ${C.border}`, color: C.muted, width: 32, height: 32, borderRadius: 8, cursor: "pointer", fontSize: 14 }}
+                  >✕</button>
+                </div>
+              )}
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,.txt,application/pdf,text/plain"
+                style={{ display: "none" }}
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) processFile(f); }}
+              />
+            </div>
+
+            {uploadErr && (
+              <div style={{
+                marginTop: 12, padding: "10px 14px", borderRadius: 10,
+                background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.4)",
+                color: C.red, fontSize: 13, fontWeight: 500,
+                boxShadow: "0 0 20px rgba(239,68,68,0.2)",
+              }}>⚠ {uploadErr}</div>
+            )}
+
+            {recent.length > 0 && (
+              <div style={{ marginTop: 14, display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+                <span style={{ color: C.muted, fontSize: 12, fontWeight: 600 }}>Recent:</span>
+                {recent.map((r) => (
+                  <button
+                    key={r.name}
+                    onClick={() => { setFileMeta({ name: r.name, size: r.size, type: r.type }); applyExtracted(r.text, { name: r.name, size: r.size, type: r.type }, false); }}
+                    style={{
+                      padding: "6px 12px", borderRadius: 999, fontSize: 12, fontWeight: 500,
+                      background: "rgba(15,28,46,0.8)", color: C.body, fontFamily: FONT,
+                      border: `1px solid ${C.border}`, cursor: "pointer", transition: "all 0.2s",
+                    }}
+                  >
+                    {r.type === "pdf" ? "📕" : "📄"} {r.name.length > 22 ? r.name.slice(0, 20) + "…" : r.name}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {syllabus && uploadStatus === "done" && (
+              <div style={{
+                marginTop: 14, padding: 14, borderRadius: 10,
+                background: "rgba(100,116,139,0.1)", border: `1px solid ${C.border}`,
+              }}>
+                <div style={{ color: C.muted, fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", marginBottom: 6 }}>PREVIEW</div>
+                <div style={{ color: C.body, fontSize: 13, lineHeight: 1.5 }}>
+                  {syllabus.slice(0, 200)}{syllabus.length > 200 ? "…" : ""}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        <Label>{mode === "upload" ? "Extracted Text (editable)" : "Paste Your Syllabus"}</Label>
         <textarea
           value={syllabus}
           onChange={(e) => setSyllabus(e.target.value)}
-          placeholder="Paste your full course syllabus here. Include unit titles, topics, and any learning objectives..."
+          placeholder={mode === "upload"
+            ? "Extracted text will appear here. You can edit it before generating."
+            : "Paste your full course syllabus here. Include unit titles, topics, and any learning objectives..."}
           className="kx-textarea"
           style={{
             width: "100%", minHeight: 220, padding: 20, fontSize: 15, lineHeight: 1.6,
             background: C.inset, color: C.text, fontFamily: FONT,
-            border: `1px solid ${C.border}`, borderRadius: 12, resize: "vertical",
-            outline: "none", boxSizing: "border-box", transition: "all 0.25s ease",
+            border: `1px solid ${textJustExtracted ? C.emerald : C.border}`, borderRadius: 12, resize: "vertical",
+            outline: "none", boxSizing: "border-box", transition: "all 0.4s ease",
             marginTop: 10,
+            boxShadow: textJustExtracted ? "0 0 0 3px rgba(16,185,129,0.2)" : "none",
           }}
         />
+
+        {syllabus && (
+          <div style={{ marginTop: 8, display: "flex", justifyContent: "space-between", fontSize: 12, color: C.muted }}>
+            <span>{charCount.toLocaleString()} characters</span>
+            <span>Estimated: ~{estMinutes} min to generate</span>
+          </div>
+        )}
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, marginTop: 22 }}>
           <Select label="Tone" value={tone} onChange={setTone} options={["formal", "conversational", "socratic"]} />
