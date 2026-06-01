@@ -1256,6 +1256,7 @@ function GlobalStyles() {
       }
       @keyframes kxFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
       @keyframes kxPop { 0% { transform: scale(0); opacity: 0; } 60% { transform: scale(1.3); opacity: 1; } 100% { transform: scale(1); } }
+      @keyframes kxScanSweep { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
       .kx-float { animation: kxFloat 2.4s ease-in-out infinite; display: inline-block; }
 
       .kx-fadeup { animation: kxFadeUp 0.6s cubic-bezier(0.4, 0, 0.2, 1); }
