@@ -1214,6 +1214,9 @@ function GlobalStyles() {
         0% { background-position: -200% center; }
         100% { background-position: 200% center; }
       }
+      @keyframes kxFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+      @keyframes kxPop { 0% { transform: scale(0); opacity: 0; } 60% { transform: scale(1.3); opacity: 1; } 100% { transform: scale(1); } }
+      .kx-float { animation: kxFloat 2.4s ease-in-out infinite; display: inline-block; }
 
       .kx-fadeup { animation: kxFadeUp 0.6s cubic-bezier(0.4, 0, 0.2, 1); }
       .kx-tab-content { animation: kxFadeUp 0.35s ease; }
