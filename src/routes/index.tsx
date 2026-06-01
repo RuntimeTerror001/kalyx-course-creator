@@ -368,6 +368,7 @@ function InputView({
     }
     const meta = { name: file.name, size: file.size, type: isPdf ? "pdf" : "txt" };
     setFileMeta(meta);
+    setUploadProgress(0);
     setUploadStatus("reading");
     setUploadMsg("Reading file...");
     try {
