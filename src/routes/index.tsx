@@ -378,14 +378,33 @@ function InputView({
         const buf = await file.arrayBuffer();
         const pdf = await pdfjs.getDocument({ data: buf }).promise;
         const total = pdf.numPages;
-        let full = "";
+        const pageTexts: string[] = [];
         for (let p = 1; p <= total; p++) {
           setUploadMsg(`Extracting text from page ${p} of ${total}...`);
+          setUploadProgress(Math.round((p - 1) / total * 100));
           const page = await pdf.getPage(p);
           const content = await page.getTextContent();
-          const str = content.items.map((it: any) => it.str).join(" ");
-          full += str + "\n\n";
+          // Reconstruct lines using y-coordinate from text transform matrix
+          let line = "";
+          let lastY: number | null = null;
+          const lines: string[] = [];
+          for (const it of content.items as any[]) {
+            const y = it.transform ? it.transform[5] : null;
+            if (lastY !== null && y !== null && Math.abs(y - lastY) > 2) {
+              if (line.trim()) lines.push(line.trim());
+              line = "";
+            }
+            line += it.str;
+            if (it.hasEOL) { if (line.trim()) lines.push(line.trim()); line = ""; }
+            else line += " ";
+            lastY = y;
+          }
+          if (line.trim()) lines.push(line.trim());
+          pageTexts.push(lines.join("\n"));
         }
+        setUploadProgress(100);
+        const full = pageTexts.join("\n\n").replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n");
+        if (!full.trim()) throw new Error("No text found — this PDF may be a scanned image");
         applyExtracted(full.trim(), meta);
       }
     } catch (e: any) {
