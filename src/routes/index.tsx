@@ -490,7 +490,7 @@ function InputView({
               onDragLeave={() => setDragOver(false)}
               onDrop={onDrop}
               style={{
-                position: "relative",
+                position: "relative", overflow: "hidden",
                 background: dragOver ? "rgba(14,165,233,0.1)" : C.inset,
                 borderRadius: 16, padding: 40, textAlign: "center",
                 border: dragOver ? `2px solid ${C.blue}` : "2px dashed transparent",
@@ -499,10 +499,29 @@ function InputView({
                   : `linear-gradient(${C.inset}, ${C.inset}), ${GRAD_PRIMARY}`,
                 backgroundOrigin: "border-box",
                 backgroundClip: dragOver ? undefined : "padding-box, border-box",
-                boxShadow: dragOver ? "0 0 30px rgba(14,165,233,0.4)" : "none",
+                boxShadow: dragOver
+                  ? "0 0 30px rgba(14,165,233,0.4)"
+                  : uploadStatus === "reading" ? "0 0 40px rgba(99,102,241,0.35)" : "none",
                 transition: "all 0.25s ease",
               }}
             >
+              {uploadStatus === "reading" && (
+                <>
+                  <div style={{
+                    position: "absolute", inset: 0, pointerEvents: "none",
+                    background: "linear-gradient(90deg, transparent 0%, rgba(14,165,233,0.15) 45%, rgba(139,92,246,0.2) 50%, rgba(236,72,153,0.15) 55%, transparent 100%)",
+                    backgroundSize: "200% 100%",
+                    animation: "kxScanSweep 1.6s linear infinite",
+                  }} />
+                  <div style={{
+                    position: "absolute", left: 0, right: 0, bottom: 0, height: 3,
+                    background: `linear-gradient(90deg, ${C.blue}, ${C.purple}, ${C.pink})`,
+                    width: `${uploadProgress}%`,
+                    transition: "width 0.3s ease",
+                    boxShadow: "0 0 12px rgba(14,165,233,0.7)",
+                  }} />
+                </>
+              )}
               {!fileMeta && (
                 <>
                   <div className="kx-float" style={{ fontSize: 56, lineHeight: 1, transform: dragOver ? "scale(1.15)" : "scale(1)", transition: "transform 0.2s" }}>📤</div>
