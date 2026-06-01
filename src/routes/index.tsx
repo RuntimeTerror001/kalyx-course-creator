@@ -329,6 +329,7 @@ function InputView({
   const [uploadStatus, setUploadStatus] = useState<"idle" | "reading" | "done" | "error">("idle");
   const [uploadMsg, setUploadMsg] = useState("");
   const [uploadErr, setUploadErr] = useState("");
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [textJustExtracted, setTextJustExtracted] = useState(false);
   const [recent, setRecent] = useState<{ name: string; size: number; type: string; text: string }[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
