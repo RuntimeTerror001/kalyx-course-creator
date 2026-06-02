@@ -38,7 +38,63 @@ const C = {
 };
 
 const FONT = "'Inter', system-ui, -apple-system, sans-serif";
-const API_URL = "https://YOUR-REPLIT-URL/api/generate";
+const API_BASE =
+  (import.meta.env.VITE_API_BASE as string | undefined) ||
+  (typeof window !== "undefined" ? "" : "http://127.0.0.1:8765");
+
+const API_URL =
+  (import.meta.env.VITE_API_URL as string | undefined) ||
+  `${API_BASE}/api/generate`;
+
+function estimateTopics(syllabus: string): number {
+  const unitMatches = syllabus.match(/\bunit\s*[\dIVX]+/gi);
+  const units = unitMatches?.length ?? 0;
+  if (units > 0) return Math.min(15, units * 3);
+  const lines = syllabus.split("\n").filter((l) => l.trim().length > 10);
+  return Math.min(15, Math.max(3, Math.ceil(lines.length / 4) || 6));
+}
+
+function groupSlidesByTopic(slides: any[]): [string, any[]][] {
+  const groups: Record<string, any[]> = {};
+  for (const s of slides) {
+    const key = s.topic || s.unit || "General";
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(s);
+  }
+  return Object.entries(groups);
+}
+
+function groupQuizByUnit(quiz: any[]): [string, any[]][] {
+  const groups: Record<string, any[]> = {};
+  for (const q of quiz) {
+    const key = q.unit || "General";
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(q);
+  }
+  return Object.entries(groups);
+}
+
+function normalizeQuizAnswer(q: any): number {
+  if (typeof q.answer === "number") return q.answer;
+  if (typeof q.answer === "string" && Array.isArray(q.options)) {
+    const idx = q.options.findIndex(
+      (o: string) => o.trim().toLowerCase() === q.answer.trim().toLowerCase(),
+    );
+    if (idx >= 0) return idx;
+    const letter = q.answer.trim().toUpperCase();
+    const letterIdx = letter.charCodeAt(0) - 65;
+    if (letterIdx >= 0 && letterIdx < q.options.length) return letterIdx;
+  }
+  return 0;
+}
+
+function quizBloom(q: any): string {
+  return q.bloom_level || q.bloom || "";
+}
+
+function quizType(q: any): string {
+  return (q.type || "mcq").toLowerCase();
+}
 
 const GRAD_PRIMARY = "linear-gradient(135deg, #0EA5E9 0%, #6366F1 100%)";
 const GRAD_SECONDARY = "linear-gradient(135deg, #8B5CF6 0%, #EC4899 100%)";
@@ -67,45 +123,72 @@ const FUN_FACTS = [
 
 function mockGenerate(syllabus: string) {
   const course = syllabus.split("\n")[0]?.trim().slice(0, 80) || "Sample Course";
-  const slides = Array.from({ length: 6 }).map((_, i) => ({
-    unit: `Unit ${Math.floor(i / 2) + 1}`,
-    number: i + 1,
-    title: `Topic ${i + 1}: Core Concepts`,
-    bullets: [
-      "Introduction to the foundational principles",
-      "Historical background and motivation",
-      "Key definitions and terminology",
-      "Worked example demonstrating concept",
-      "Common pitfalls to avoid",
-      "Connection to next topic",
-    ],
-    takeaway: "Mastering this concept unlocks the next module.",
+  const topics = ["Fundamentals", "Core Concepts", "Advanced Applications"];
+  const unitTitle = "Unit 1";
+  const longBullet =
+    "This bullet explains the concept in depth with context, technical detail, and a connection to real world practice that students can apply immediately in projects.";
+  const slides = topics.flatMap((topic, ti) =>
+    Array.from({ length: 4 }).map((_, i) => ({
+      slide_number: ti * 4 + i + 1,
+      unit: unitTitle,
+      topic,
+      title: `${topic}: Detailed Slide ${i + 1}`,
+      bullets: Array.from({ length: 8 }).map((_, bi) => `${longBullet} (point ${bi + 1})`),
+      real_world_example: "A major tech company deployed this pattern to reduce latency by forty percent in production.",
+      key_takeaway: "Understanding this slide's theme is essential before moving to applied scenarios.",
+    })),
+  );
+  const notes = topics.map((topic) => ({
+    topic,
+    unit: unitTitle,
+    introduction:
+      "This topic opens the unit with motivation and scope. Students learn why the field matters in industry and academia. We connect prior knowledge to new material. The introduction sets expectations for depth and assessment. By the end, learners can articulate goals clearly.",
+    core_concepts:
+      "Core ideas are defined with precision and illustrated through worked examples. Each concept links to prerequisites students already know. We compare similar terms to prevent confusion. Diagrams are described verbally for accessibility. Examples span small classroom cases and larger systems. Terminology is used consistently throughout. Misconceptions are flagged early. Students practice identifying structures in novel prompts.",
+    deep_explanation:
+      "Advanced nuance covers edge cases practitioners encounter in production. We discuss tradeoffs between common approaches with quantitative intuition. Failure modes and debugging strategies are emphasized. Comparisons to alternative paradigms clarify when not to use this method. Security and ethics appear where relevant. Performance considerations include asymptotic and constant factors. Tooling choices reflect realistic team constraints. Experts' heuristics are made explicit for study.",
+    real_world_application:
+      "Industry teams use these ideas in recommendation, forecasting, and operations pipelines. Startups prototype quickly by reusing patterns from mature frameworks. Regulated domains document decisions for audit trails. Open source ecosystems provide reference implementations to study. Capstone projects mirror constrained timelines and incomplete data.",
+    common_mistakes:
+      "Students often confuse correlation with causation when interpreting results. They skip data validation and discover issues only at deployment. Another mistake is memorizing formulas without understanding assumptions. Teams also underestimate communication overhead in cross functional work.",
+    exam_tips:
+      "Examiners favor precise definitions followed by short applied scenarios. Show assumptions before calculations. Label diagrams clearly when sketched.",
+    summary:
+      "The topic integrates theory and practice. Master the vocabulary and one worked pipeline end to end. Review mistakes list before assessments.",
   }));
-  const notes = Array.from({ length: 4 }).map((_, i) => ({
-    unit: `Unit ${i + 1}`,
-    title: `Detailed Notes — Topic ${i + 1}`,
-    introduction: "This topic introduces the learner to the field and its goals.",
-    explanation: "We break the topic into digestible parts, examining each in detail with examples.",
-    application: "Applied in real-world systems such as recommendation engines and forecasting.",
-    mistakes: "Confusing correlation with causation; ignoring data quality.",
-    summary: "Solid grasp here is essential for upcoming units.",
-  }));
-  const quiz = [
-    { type: "mcq", unit: "Unit 1", bloom: "Remember", question: "Which is a key term introduced in Unit 1?", options: ["Heuristic", "Gradient", "Token", "Schema"], answer: 0 },
-    { type: "mcq", unit: "Unit 1", bloom: "Understand", question: "Why is normalization important?", options: ["Speed", "Stability", "Aesthetics", "Bandwidth"], answer: 1 },
-    { type: "truefalse", unit: "Unit 2", bloom: "Apply", question: "Bias-variance tradeoff is irrelevant for deep nets.", answer: "False" },
-    { type: "short", unit: "Unit 2", bloom: "Analyze", question: "Compare batch vs online learning in one sentence.", answer: "Batch trains on full datasets; online updates per sample." },
-    { type: "case", unit: "Unit 3", bloom: "Evaluate", question: "A model overfits training data. Evaluate three remediation strategies.", answer: "Regularization, more data, simpler architecture." },
-    { type: "mcq", unit: "Unit 3", bloom: "Create", question: "Design a feature for churn prediction.", options: ["Tenure_months", "RandomID", "RowNumber", "Timestamp"], answer: 0 },
-  ];
+  const bloomSeq = ["Remember", "Understand", "Apply", "Analyze", "Evaluate", "Create"] as const;
+  const quiz = Array.from({ length: 12 }).map((_, i) => {
+    const bloom = bloomSeq[i % bloomSeq.length];
+    const options = ["First plausible option with detail", "Second plausible option with detail", "Third plausible option with detail", "Fourth plausible option with detail"];
+    return {
+      question_number: i + 1,
+      type: "MCQ",
+      unit: unitTitle,
+      topic: topics[i % topics.length],
+      bloom_level: bloom,
+      question: `In the context of ${topics[i % topics.length]}, which statement best reflects the principle described in advanced study materials and lecture content? (Q${i + 1})`,
+      options,
+      answer: options[0],
+      explanation:
+        "Option A is correct because it aligns with the definition and applied scenarios discussed in class. The other options confuse related but distinct concepts or omit key constraints mentioned in the unit outcomes and worked examples.",
+    };
+  });
+  const total = quiz.length;
+  const bloom_coverage = Object.fromEntries(
+    BLOOM_LEVELS.map((lvl) => [
+      lvl,
+      Math.round((quiz.filter((q) => q.bloom_level === lvl).length / total) * 100),
+    ]),
+  );
   return {
     course,
     total_slides: slides.length,
     total_quiz: quiz.length,
+    total_notes: notes.length,
     slides,
     notes,
     quiz,
-    bloom_coverage: { Remember: 25, Understand: 22, Apply: 18, Analyze: 15, Evaluate: 12, Create: 8 },
+    bloom_coverage,
   };
 }
 
@@ -119,49 +202,86 @@ function Kalyx() {
   const [step, setStep] = useState("");
   const [result, setResult] = useState<any>(null);
   const [tab, setTab] = useState<"slides" | "notes" | "quiz">("slides");
-  const intervalRef = useRef<any>(null);
+  const [apiError, setApiError] = useState<string | null>(null);
+  const [backendOk, setBackendOk] = useState<boolean | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const topicTotal = useMemo(() => estimateTopics(syllabus), [syllabus]);
+
+  useEffect(() => {
+    const check = async () => {
+      try {
+        const r = await axios.get(`${API_BASE}/api/status`, { timeout: 5000 });
+        setBackendOk(r.data?.groq_configured === true);
+      } catch {
+        try {
+          await axios.get(`${API_BASE}/health`, { timeout: 5000 });
+          setBackendOk(true);
+        } catch {
+          setBackendOk(false);
+        }
+      }
+    };
+    check();
+  }, []);
 
   useEffect(() => {
     if (!loading) return;
-    const steps = [
-      "Extracting course structure...",
-      "Analyzing unit topology...",
-      "Generating slide content...",
-      "Drafting detailed notes...",
-      "Composing quiz questions...",
-      "Calibrating Bloom's coverage...",
-      "Finalizing your course...",
-    ];
     let p = 0;
-    let i = 0;
-    setStep(steps[0]);
+    let topicIdx = 1;
+    setStep(`Generating topic ${topicIdx} of ${topicTotal}...`);
     intervalRef.current = setInterval(() => {
-      p = Math.min(p + 3, 95);
+      p = Math.min(p + 2, 95);
       setProgress(p);
-      const idx = Math.min(Math.floor(p / 14), steps.length - 1);
-      if (idx !== i) {
-        i = idx;
-        setStep(steps[idx]);
+      const nextTopic = Math.min(topicTotal, Math.max(1, Math.ceil((p / 95) * topicTotal)));
+      if (nextTopic !== topicIdx) {
+        topicIdx = nextTopic;
+        setStep(`Generating topic ${topicIdx} of ${topicTotal}...`);
       }
-    }, 220);
-    return () => clearInterval(intervalRef.current);
-  }, [loading]);
+    }, 280);
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [loading, topicTotal]);
 
   const handleGenerate = async () => {
     if (!syllabus.trim()) return;
     setLoading(true);
     setProgress(0);
+    setApiError(null);
     try {
-      const res = await axios.post(API_URL, { syllabus_text: syllabus, tone, depth, difficulty }, { timeout: 30000 });
+      const res = await axios.post(
+        API_URL,
+        {
+          syllabus_text: syllabus,
+          tone,
+          depth,
+          difficulty,
+          max_units: 5,
+          max_topics: 4,
+        },
+        { timeout: 600000 },
+      );
+      if (!res.data?.slides?.length && !res.data?.quiz?.length) {
+        throw new Error("Backend returned empty content. Check the API key and server logs.");
+      }
       setResult(res.data);
-    } catch {
-      await new Promise((r) => setTimeout(r, 1400));
-      setResult(mockGenerate(syllabus));
+    } catch (err: any) {
+      const msg =
+        err?.response?.data?.detail ||
+        err?.message ||
+        "Could not reach the KALYX backend. Run: npm run dev:backend  (port 8765)";
+      setApiError(msg);
+      console.error("Generate failed:", err);
     } finally {
       setProgress(100);
       setStep("Done");
       setTimeout(() => setLoading(false), 350);
     }
+  };
+
+  const handleDemo = () => {
+    setApiError(null);
+    setResult(mockGenerate(syllabus));
   };
 
   const handleBack = () => {
@@ -195,6 +315,9 @@ function Kalyx() {
             depth={depth} setDepth={setDepth}
             difficulty={difficulty} setDifficulty={setDifficulty}
             onGenerate={handleGenerate}
+            onDemo={handleDemo}
+            apiError={apiError}
+            backendOk={backendOk}
           />
         ) : (
           <Dashboard result={result} tab={tab} setTab={setTab} onBack={handleBack} />
@@ -322,6 +445,7 @@ function formatBytes(n: number) {
 
 function InputView({
   syllabus, setSyllabus, tone, setTone, depth, setDepth, difficulty, setDifficulty, onGenerate,
+  onDemo, apiError, backendOk,
 }: any) {
   const [mode, setMode] = useState<"paste" | "upload">("paste");
   const [dragOver, setDragOver] = useState(false);
@@ -658,6 +782,34 @@ function InputView({
           </div>
         )}
 
+        {backendOk === false && (
+          <div style={{
+            marginTop: 16, padding: "12px 16px", borderRadius: 10,
+            background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.4)",
+            color: C.red, fontSize: 13,
+          }}>
+            ⚠ Backend offline or Groq API key missing. Run the backend from the <code style={{ color: C.text }}>backend</code> folder, then refresh.
+          </div>
+        )}
+        {backendOk === true && (
+          <div style={{
+            marginTop: 16, padding: "10px 14px", borderRadius: 10,
+            background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.3)",
+            color: C.emerald, fontSize: 13,
+          }}>
+            ✓ Backend connected — AI generation ready (up to 5 units × 4 topics; 30 slides & 50 MCQs per topic).
+          </div>
+        )}
+        {apiError && (
+          <div style={{
+            marginTop: 12, padding: "12px 16px", borderRadius: 10,
+            background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.4)",
+            color: C.red, fontSize: 13, lineHeight: 1.5,
+          }}>
+            ⚠ {apiError}
+          </div>
+        )}
+
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, marginTop: 22 }}>
           <Select label="Tone" value={tone} onChange={setTone} options={["formal", "conversational", "socratic"]} />
           <Select label="Depth" value={depth} onChange={setDepth} options={["basic", "intermediate", "advanced"]} />
@@ -682,6 +834,22 @@ function InputView({
           }}
         >
           ✨ Generate with KALYX
+        </button>
+
+        <button
+          type="button"
+          onClick={onDemo}
+          disabled={!syllabus.trim()}
+          style={{
+            marginTop: 12, width: "100%", height: 44,
+            background: "transparent", color: C.subtle,
+            fontSize: 14, fontWeight: 600, fontFamily: FONT,
+            border: `1px solid ${C.border}`, borderRadius: 10,
+            cursor: !syllabus.trim() ? "not-allowed" : "pointer",
+            opacity: !syllabus.trim() ? 0.45 : 1,
+          }}
+        >
+          Try demo (offline preview)
         </button>
       </div>
     </div>
@@ -796,6 +964,7 @@ function FullLoading({ progress, step }: { progress: number; step: string }) {
 /* ---------------- Dashboard ---------------- */
 
 function Dashboard({ result, tab, setTab, onBack }: { result: any; tab: "slides" | "notes" | "quiz"; setTab: (t: "slides" | "notes" | "quiz") => void; onBack: () => void }) {
+  const [exporting, setExporting] = useState<"pdf" | "pptx" | null>(null);
   const overall = Math.round(
     BLOOM_LEVELS.reduce((a, l) => a + (result.bloom_coverage?.[l] ?? 0), 0) / BLOOM_LEVELS.length
   );
@@ -804,19 +973,76 @@ function Dashboard({ result, tab, setTab, onBack }: { result: any; tab: "slides"
   (result.slides || []).forEach((s: any) => s.unit && units.add(s.unit));
   const unitCount = units.size || (result.notes?.length ?? 0);
 
+  const handleExport = async (type: "pdf" | "pptx") => {
+    try {
+      setExporting(type);
+      const response = await axios.post(
+        `${API_BASE}/api/export/${type}`,
+        {
+          course: result.course,
+          slides: result.slides,
+          notes: result.notes,
+          quiz: result.quiz,
+          bloom_coverage: result.bloom_coverage,
+        },
+        { responseType: "blob" },
+      );
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", `${result.course}_KALYX.${type}`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Export failed:", error);
+    } finally {
+      setExporting(null);
+    }
+  };
+
   return (
     <div className="kx-fadeup">
-      <button
-        onClick={onBack}
-        className="kx-back"
-        style={{
-          background: "rgba(15,28,46,0.6)", border: `1px solid ${C.border}`, color: C.text,
-          padding: "8px 16px", borderRadius: 10, cursor: "pointer", fontSize: 13, fontFamily: FONT,
-          transition: "all 0.25s ease", fontWeight: 500,
-        }}
-      >
-        ← Back to input
-      </button>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+        <button
+          onClick={onBack}
+          className="kx-back"
+          style={{
+            background: "rgba(15,28,46,0.6)", border: `1px solid ${C.border}`, color: C.text,
+            padding: "8px 16px", borderRadius: 10, cursor: "pointer", fontSize: 13, fontFamily: FONT,
+            transition: "all 0.25s ease", fontWeight: 500,
+          }}
+        >
+          ← Generate Another
+        </button>
+        <button
+          onClick={() => handleExport("pdf")}
+          disabled={!!exporting}
+          style={{
+            padding: "8px 18px", borderRadius: 10, border: "none", cursor: exporting ? "wait" : "pointer",
+            fontSize: 13, fontWeight: 700, fontFamily: FONT, color: "#fff",
+            background: "linear-gradient(135deg, #EF4444 0%, #F59E0B 100%)",
+            opacity: exporting && exporting !== "pdf" ? 0.5 : 1,
+            boxShadow: "0 8px 24px -8px rgba(239,68,68,0.5)",
+          }}
+        >
+          {exporting === "pdf" ? "Generating PDF..." : "📄 Export PDF"}
+        </button>
+        <button
+          onClick={() => handleExport("pptx")}
+          disabled={!!exporting}
+          style={{
+            padding: "8px 18px", borderRadius: 10, border: "none", cursor: exporting ? "wait" : "pointer",
+            fontSize: 13, fontWeight: 700, fontFamily: FONT, color: "#fff",
+            background: "linear-gradient(135deg, #0EA5E9 0%, #8B5CF6 100%)",
+            opacity: exporting && exporting !== "pptx" ? 0.5 : 1,
+            boxShadow: "0 8px 24px -8px rgba(14,165,233,0.5)",
+          }}
+        >
+          {exporting === "pptx" ? "Generating PPTX..." : "📊 Export PPTX"}
+        </button>
+      </div>
 
       <h1 style={{
         display: "flex", alignItems: "center", gap: 14, fontSize: 36, fontWeight: 800,
@@ -869,10 +1095,16 @@ function Dashboard({ result, tab, setTab, onBack }: { result: any; tab: "slides"
         ))}
       </div>
 
-      <div key={tab} style={{ marginTop: 24, display: "flex", flexDirection: "column", gap: 16 }} className="kx-tab-content">
-        {tab === "slides" && (result.slides || []).map((s: any, i: number) => <SlideCard key={i} slide={s} index={i} />)}
-        {tab === "notes" && (result.notes || []).map((n: any, i: number) => <NoteCard key={i} note={n} index={i} />)}
-        {tab === "quiz" && (result.quiz || []).map((q: any, i: number) => <QuizCard key={i} q={q} index={i} total={result.quiz.length} />)}
+      <div key={tab} style={{ marginTop: 24 }} className="kx-tab-content">
+        {tab === "slides" && <SlidesTab slides={result.slides || []} />}
+        {tab === "notes" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            {(result.notes || []).map((n: any, i: number) => (
+              <NoteCard key={i} note={n} index={i} />
+            ))}
+          </div>
+        )}
+        {tab === "quiz" && <QuizTab quiz={result.quiz || []} />}
       </div>
     </div>
   );
@@ -975,9 +1207,182 @@ function BloomCoverage({ coverage, overall, grade }: { coverage: Record<string, 
   );
 }
 
+/* ---------------- Slides tab ---------------- */
+
+function SlidesTab({ slides }: { slides: any[] }) {
+  const [search, setSearch] = useState("");
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return slides;
+    return slides.filter((s) => (s.title || "").toLowerCase().includes(q));
+  }, [slides, search]);
+  const groups = useMemo(() => groupSlidesByTopic(filtered), [filtered]);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div style={{ position: "relative" }}>
+        <input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search slides by title..."
+          className="kx-textarea"
+          style={{
+            width: "100%",
+            padding: "12px 16px 12px 40px",
+            fontSize: 14,
+            background: C.inset,
+            color: C.text,
+            fontFamily: FONT,
+            border: `1px solid ${C.border}`,
+            borderRadius: 10,
+            outline: "none",
+            boxSizing: "border-box",
+          }}
+        />
+        <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", fontSize: 14, opacity: 0.5 }}>
+          🔍
+        </span>
+        {search && (
+          <span style={{ position: "absolute", right: 14, top: "50%", transform: "translateY(-50%)", fontSize: 12, color: C.muted }}>
+            {filtered.length} match{filtered.length !== 1 ? "es" : ""}
+          </span>
+        )}
+      </div>
+      {groups.length === 0 && (
+        <div style={{ color: C.muted, textAlign: "center", padding: 32 }}>No slides match your search.</div>
+      )}
+      {groups.map(([topic, topicSlides]) => (
+        <div key={topic}>
+          <div style={{
+            fontSize: 13,
+            fontWeight: 700,
+            color: C.blue,
+            textTransform: "uppercase",
+            letterSpacing: "0.12em",
+            marginBottom: 14,
+            paddingBottom: 8,
+            borderBottom: `1px solid ${C.border}`,
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+          }}>
+            <span>📑</span>
+            {topic}
+            <span style={{ color: C.muted, fontWeight: 500, textTransform: "none", letterSpacing: 0 }}>
+              ({topicSlides.length} slides)
+            </span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            {topicSlides.map((s, i) => (
+              <SlideCard key={`${topic}-${s.slide_number ?? i}`} slide={s} index={i} />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ---------------- Quiz tab ---------------- */
+
+function QuizTab({ quiz }: { quiz: any[] }) {
+  const [bloomFilter, setBloomFilter] = useState<string>("all");
+  const filtered = useMemo(() => {
+    if (bloomFilter === "all") return quiz;
+    return quiz.filter((q) => quizBloom(q) === bloomFilter);
+  }, [quiz, bloomFilter]);
+  const groups = useMemo(() => groupQuizByUnit(filtered), [filtered]);
+  const total = quiz.length;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+        <span style={{ fontSize: 12, color: C.muted, fontWeight: 600, marginRight: 4 }}>Bloom level:</span>
+        <button
+          onClick={() => setBloomFilter("all")}
+          style={filterChipStyle(bloomFilter === "all", C.text)}
+        >
+          All ({quiz.length})
+        </button>
+        {BLOOM_LEVELS.map((lvl) => {
+          const count = quiz.filter((q) => quizBloom(q) === lvl).length;
+          if (!count) return null;
+          const color = BLOOM_COLORS[lvl];
+          return (
+            <button
+              key={lvl}
+              onClick={() => setBloomFilter(lvl)}
+              style={filterChipStyle(bloomFilter === lvl, color)}
+            >
+              {lvl} ({count})
+            </button>
+          );
+        })}
+      </div>
+      {filtered.length === 0 && (
+        <div style={{ color: C.muted, textAlign: "center", padding: 32 }}>No questions match this filter.</div>
+      )}
+      {groups.map(([unit, unitQuiz]) => (
+        <div key={unit}>
+          <div style={{
+            fontSize: 13,
+            fontWeight: 700,
+            color: unitColorFor(unit),
+            textTransform: "uppercase",
+            letterSpacing: "0.12em",
+            marginBottom: 14,
+            paddingBottom: 8,
+            borderBottom: `1px solid ${C.border}`,
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+          }}>
+            <span>📚</span>
+            {unit}
+            <span style={{ color: C.muted, fontWeight: 500, textTransform: "none", letterSpacing: 0 }}>
+              ({unitQuiz.length} questions)
+            </span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            {unitQuiz.map((q, i) => {
+              const globalIndex = quiz.indexOf(q);
+              return (
+                <QuizCard
+                  key={`${unit}-${q.question_number ?? globalIndex}`}
+                  q={q}
+                  index={globalIndex >= 0 ? globalIndex : i}
+                  total={total}
+                />
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function filterChipStyle(active: boolean, accent: string): React.CSSProperties {
+  return {
+    padding: "6px 14px",
+    borderRadius: 999,
+    fontSize: 12,
+    fontWeight: 600,
+    fontFamily: FONT,
+    cursor: "pointer",
+    border: active ? `1px solid ${accent}` : `1px solid ${C.border}`,
+    background: active ? `${accent}22` : "rgba(15,28,46,0.6)",
+    color: active ? accent : C.muted,
+    transition: "all 0.2s ease",
+  };
+}
+
 /* ---------------- Slide Card ---------------- */
 
 function SlideCard({ slide, index }: { slide: any; index: number }) {
+  const slideNum = slide.slide_number ?? slide.number ?? index + 1;
+  const takeaway = slide.key_takeaway ?? slide.takeaway;
   const unitColor = unitColorFor(slide.unit);
   return (
     <div className="kx-card-hover" style={{
@@ -992,8 +1397,13 @@ function SlideCard({ slide, index }: { slide: any; index: number }) {
           padding: "4px 12px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: "#fff",
           background: GRAD_PRIMARY,
         }}>
-          SLIDE {slide.number}
+          SLIDE {slideNum}
         </span>
+        {slide.topic && (
+          <span style={{ padding: "4px 12px", borderRadius: 999, fontSize: 11, fontWeight: 600, color: C.purple, background: "rgba(139,92,246,0.12)", border: "1px solid rgba(139,92,246,0.35)" }}>
+            {slide.topic}
+          </span>
+        )}
         {slide.unit && (
           <span style={{ padding: "4px 12px", borderRadius: 999, fontSize: 11, fontWeight: 600, color: unitColor, background: `${unitColor}1a`, border: `1px solid ${unitColor}40` }}>
             {slide.unit}
@@ -1009,13 +1419,23 @@ function SlideCard({ slide, index }: { slide: any; index: number }) {
           </div>
         ))}
       </div>
-      {slide.takeaway && (
+      {slide.real_world_example && (
+        <div style={{
+          marginTop: 16, padding: "12px 16px", borderRadius: 10,
+          background: "rgba(14,165,233,0.08)", border: "1px solid rgba(14,165,233,0.25)",
+          fontSize: 13, color: C.body, display: "flex", alignItems: "flex-start", gap: 10,
+        }}>
+          <span>🌍</span>
+          <span><strong style={{ color: C.blue }}>Real world:</strong> {slide.real_world_example}</span>
+        </div>
+      )}
+      {takeaway && (
         <div style={{
           marginTop: 18, padding: "12px 16px", borderRadius: 10,
           background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.25)",
           fontSize: 13, color: C.amber, fontStyle: "italic", display: "flex", alignItems: "flex-start", gap: 10,
         }}>
-          <span>💡</span><span style={{ color: "#FCD34D" }}>{slide.takeaway}</span>
+          <span>💡</span><span style={{ color: "#FCD34D" }}>{takeaway}</span>
         </div>
       )}
     </div>
@@ -1034,6 +1454,7 @@ function unitColorFor(unit?: string) {
 function NoteCard({ note, index }: { note: any; index: number }) {
   const [open, setOpen] = useState(true);
   const unitColor = unitColorFor(note.unit);
+  const title = note.title || note.topic || `Notes ${index + 1}`;
   return (
     <div className="kx-card-hover" style={{
       background: C.card, border: `1px solid ${C.border}`, borderRadius: 14,
@@ -1041,7 +1462,7 @@ function NoteCard({ note, index }: { note: any; index: number }) {
       animation: `kxStaggerFade 0.5s ease ${index * 60}ms both`,
     }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-        <div style={{ fontSize: 20, fontWeight: 700, color: C.text, letterSpacing: "-0.01em" }}>{note.title}</div>
+        <div style={{ fontSize: 20, fontWeight: 700, color: C.text, letterSpacing: "-0.01em" }}>{title}</div>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {note.unit && (
             <span style={{ padding: "4px 12px", borderRadius: 999, fontSize: 11, fontWeight: 600, color: unitColor, background: `${unitColor}1a`, border: `1px solid ${unitColor}40` }}>
@@ -1057,16 +1478,18 @@ function NoteCard({ note, index }: { note: any; index: number }) {
       {open && (
         <div style={{ marginTop: 16 }}>
           <NoteSection label="Introduction" text={note.introduction} color={C.blue} />
-          <NoteSection label="Explanation" text={note.explanation} color={C.indigo} />
-          <NoteSection label="Application" text={note.application} color={C.purple} />
-          {note.mistakes && (
+          <NoteSection label="Core Concepts" text={note.core_concepts || note.explanation} color={C.indigo} />
+          <NoteSection label="Deep Explanation" text={note.deep_explanation} color={C.purple} />
+          <NoteSection label="Application" text={note.real_world_application || note.application} color={C.pink} />
+          {(note.common_mistakes || note.mistakes) && (
             <div style={{ marginTop: 14, borderLeft: `3px solid ${C.amber}`, paddingLeft: 14 }}>
               <div style={{ fontSize: 11, color: C.amber, textTransform: "uppercase", letterSpacing: "0.12em", fontWeight: 700, marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
                 ⚠ Common Mistakes
               </div>
-              <div style={{ fontSize: 14, color: C.body, lineHeight: 1.7 }}>{note.mistakes}</div>
+              <div style={{ fontSize: 14, color: C.body, lineHeight: 1.7 }}>{note.common_mistakes || note.mistakes}</div>
             </div>
           )}
+          <NoteSection label="Exam Tips" text={note.exam_tips} color={C.amber} />
           {note.summary && <NoteSection label="Summary" text={note.summary} color={C.emerald} />}
         </div>
       )}
@@ -1090,8 +1513,12 @@ function QuizCard({ q, index, total }: { q: any; index: number; total: number })
   const [revealed, setRevealed] = useState(false);
   const [selected, setSelected] = useState<number | null>(null);
   const [bookmarked, setBookmarked] = useState(false);
-  const bloomColor = BLOOM_COLORS[q.bloom] || C.muted;
+  const bloom = quizBloom(q);
+  const bloomColor = BLOOM_COLORS[bloom] || C.muted;
   const unitColor = unitColorFor(q.unit);
+  const qNum = q.question_number ?? index + 1;
+  const correctIdx = normalizeQuizAnswer(q);
+  const type = quizType(q);
 
   return (
     <div className="kx-card-hover" style={{
@@ -1104,8 +1531,10 @@ function QuizCard({ q, index, total }: { q: any; index: number; total: number })
           <span style={{
             padding: "4px 12px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: "#fff",
             background: GRAD_PRIMARY,
-          }}>Q{index + 1}</span>
-          <span style={{ fontSize: 11, color: C.muted, fontWeight: 500 }}>of {total}</span>
+          }}>Q{qNum}</span>
+          <span style={{ fontSize: 12, color: C.subtle, fontWeight: 600 }}>
+            Question {index + 1} of {total}
+          </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           {q.unit && (
@@ -1113,9 +1542,9 @@ function QuizCard({ q, index, total }: { q: any; index: number; total: number })
               {q.unit}
             </span>
           )}
-          {q.bloom && (
+          {bloom && (
             <span style={{ padding: "4px 12px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: bloomColor, background: `${bloomColor}1a`, border: `1px solid ${bloomColor}40` }}>
-              {q.bloom}
+              {bloom}
             </span>
           )}
           <button onClick={() => setBookmarked(!bookmarked)} style={{
@@ -1126,11 +1555,11 @@ function QuizCard({ q, index, total }: { q: any; index: number; total: number })
       </div>
       <div style={{ fontSize: 17, fontWeight: 600, color: C.text, marginTop: 14, lineHeight: 1.5 }}>{q.question}</div>
 
-      {q.type === "mcq" && (
+      {type === "mcq" && q.options && (
         <div style={{ marginTop: 16, display: "grid", gap: 10 }}>
           {q.options.map((opt: string, i: number) => {
-            const isCorrect = revealed && i === q.answer;
-            const isWrong = revealed && selected === i && i !== q.answer;
+            const isCorrect = revealed && i === correctIdx;
+            const isWrong = revealed && selected === i && i !== correctIdx;
             const base: React.CSSProperties = {
               textAlign: "left", padding: "14px 18px", borderRadius: 10, fontSize: 14, fontWeight: 500,
               fontFamily: FONT, cursor: revealed ? "default" : "pointer",
@@ -1162,21 +1591,31 @@ function QuizCard({ q, index, total }: { q: any; index: number; total: number })
         </div>
       )}
 
-      {q.type === "truefalse" && revealed && (
+      {type === "truefalse" && revealed && (
         <div className="kx-fadeup" style={{ marginTop: 14, padding: 16, background: "rgba(16,185,129,0.08)", border: `1px solid rgba(16,185,129,0.25)`, color: C.emerald, borderRadius: 10, fontWeight: 600 }}>
           Answer: {q.answer}
         </div>
       )}
 
-      {q.type === "short" && revealed && (
+      {type === "short" && revealed && (
         <div className="kx-fadeup" style={{ marginTop: 14, padding: 16, background: "rgba(245,158,11,0.08)", border: `1px solid rgba(245,158,11,0.25)`, color: C.body, borderRadius: 10 }}>
           <strong style={{ color: C.amber }}>Expected:</strong> {q.answer}
         </div>
       )}
 
-      {q.type === "case" && (
+      {type === "case" && (
         <div style={{ marginTop: 14, padding: 16, background: "rgba(14,165,233,0.08)", border: `1px solid rgba(14,165,233,0.25)`, color: C.body, borderRadius: 10 }}>
           {revealed ? <><strong style={{ color: C.blue }}>Model answer:</strong> {q.answer}</> : <em style={{ color: C.muted }}>Case study — reveal for a model answer.</em>}
+        </div>
+      )}
+
+      {revealed && q.explanation && (
+        <div className="kx-fadeup" style={{
+          marginTop: 14, padding: 16, borderRadius: 10,
+          background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.25)",
+          fontSize: 14, color: C.body, lineHeight: 1.7,
+        }}>
+          <strong style={{ color: C.indigo }}>Explanation:</strong> {q.explanation}
         </div>
       )}
 
@@ -1195,7 +1634,7 @@ function QuizCard({ q, index, total }: { q: any; index: number; total: number })
         >
           {revealed ? "Hide Answer" : "Reveal Answer"}
         </button>
-        <span style={{ fontSize: 11, color: C.muted }}>Question {index + 1} of {total}</span>
+        <span style={{ fontSize: 12, color: C.muted, fontWeight: 500 }}>Question {index + 1} of {total}</span>
       </div>
     </div>
   );
