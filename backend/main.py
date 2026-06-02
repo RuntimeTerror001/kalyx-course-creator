@@ -15,7 +15,11 @@ app.include_router(export_router)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:3000",
+        "https://kalyx-course-creator.vercel.app",  # your vercel URL
+        "https://kalyx-course-creator-x14z.vercel.app",  # new deployed vercel URL
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

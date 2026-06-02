@@ -38,13 +38,28 @@ const C = {
 };
 
 const FONT = "'Inter', system-ui, -apple-system, sans-serif";
-const API_BASE =
-  (import.meta.env.VITE_API_BASE as string | undefined) ||
-  (typeof window !== "undefined" ? "" : "http://127.0.0.1:8765");
+let envBase = import.meta.env.VITE_API_BASE as string | undefined;
+let envUrl = import.meta.env.VITE_API_URL as string | undefined;
 
-const API_URL =
-  (import.meta.env.VITE_API_URL as string | undefined) ||
-  `${API_BASE}/api/generate`;
+if (envBase) envBase = envBase.replace(/\/$/, "");
+if (envUrl) envUrl = envUrl.replace(/\/$/, "");
+
+let resolvedUrl = envUrl;
+if (resolvedUrl && !resolvedUrl.endsWith("/api/generate")) {
+  resolvedUrl = `${resolvedUrl}/api/generate`;
+}
+
+let resolvedBase = envBase;
+if (!resolvedBase) {
+  if (resolvedUrl) {
+    resolvedBase = resolvedUrl.replace(/\/api\/generate$/, "");
+  } else {
+    resolvedBase = typeof window !== "undefined" ? "" : "http://127.0.0.1:8765";
+  }
+}
+
+const API_BASE = resolvedBase;
+const API_URL = resolvedUrl || `${API_BASE}/api/generate`;
 
 function estimateTopics(syllabus: string): number {
   const unitMatches = syllabus.match(/\bunit\s*[\dIVX]+/gi);

@@ -15,7 +15,7 @@ LLM_WORKERS = int(os.environ.get("KALYX_LLM_WORKERS", "5"))
 
 def _get_llm():
     return ChatGroq(
-        model=os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile"),
+        model=os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant"),
         groq_api_key=os.environ.get("GROQ_API_KEY", ""),
         temperature=0.7,
     )
@@ -128,7 +128,7 @@ def generate_slides_for_topic(topic, unit_title, tone, depth):
     
     all_slides = []
     
-    for start, end, focus in slide_groups:
+    def fetch_group(start, end, focus):
         prompt = f"""Create 5 slides about {topic}.
 Focus: {focus}
 Unit: {unit_title}
@@ -149,16 +149,25 @@ Last character must be ]
                 json_str = clean[start_idx:end_idx+1]
                 batch = json.loads(json_str)
                 if isinstance(batch, list):
-                    all_slides.extend(batch)
-                    print(f"Slides {start}-{end}: got",
-                          len(batch))
+                    print(f"Slides {start}-{end} for {topic}: got {len(batch)} slides")
+                    return batch
                 else:
-                    print(f"Slides {start}-{end}: failed")
+                    print(f"Slides {start}-{end} for {topic}: failed (not a list)")
             else:
-                print(f"Slides {start}-{end}: no brackets")
-                
+                print(f"Slides {start}-{end} for {topic}: no brackets")
         except Exception as e:
-            print(f"Slides {start}-{end} ERROR:", str(e))
+            print(f"Slides {start}-{end} ERROR for {topic}:", str(e))
+        return []
+
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        futures = {
+            executor.submit(fetch_group, start, end, focus): (start, end)
+            for start, end, focus in slide_groups
+        }
+        for future in as_completed(futures):
+            batch = future.result()
+            if batch:
+                all_slides.extend(batch)
 
     all_slides.sort(key=lambda s: s.get("slide_number", 0))
     for i, slide in enumerate(all_slides, start=1):
@@ -187,9 +196,7 @@ def _generate_mcq_batch(topic, unit_title, difficulty, batch_index, levels):
     )
 
 
-def generate_mcq_for_topic(
-        topic, unit_title, difficulty):
-    
+def generate_mcq_for_topic(topic, unit_title, difficulty):
     llm = _get_llm()
     all_questions = []
     
@@ -202,11 +209,8 @@ def generate_mcq_for_topic(
         "Create"
     ]
     
-    for batch_idx, bloom in enumerate(
-            bloom_levels_list):
-        
+    def fetch_bloom(batch_idx, bloom):
         start_num = batch_idx * 8 + 1
-        
         prompt = f"""Create 8 multiple choice questions.
 Topic: {topic}
 Bloom level: {bloom}
@@ -221,9 +225,6 @@ Nothing else.
         
         try:
             response = llm.invoke(prompt).content
-            print(f"Quiz {bloom} raw:", 
-                  response[:100])
-            
             clean = response.strip()
             
             # Remove any text before [
@@ -234,21 +235,25 @@ Nothing else.
                 json_str = clean[start:end+1]
                 batch = json.loads(json_str)
                 if isinstance(batch, list):
-                    print(f"Quiz {bloom}: got",
-                          len(batch), "questions")
-                    all_questions.extend(batch)
+                    print(f"Quiz {bloom} for {topic}: got {len(batch)} questions")
+                    return batch
                 else:
-                    print(f"Quiz {bloom}: not a list")
+                    print(f"Quiz {bloom} for {topic}: not a list")
             else:
-                print(f"Quiz {bloom}: no brackets found")
-                print("Full response:", response[:300])
-                
+                print(f"Quiz {bloom} for {topic}: no brackets found")
         except Exception as e:
-            print(f"Quiz {bloom} ERROR:", str(e))
-            print("Response was:", 
-                  response[:200] 
-                  if 'response' in dir() 
-                  else "no response")
+            print(f"Quiz {bloom} ERROR for {topic}:", str(e))
+        return []
+
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        futures = {
+            executor.submit(fetch_bloom, idx, bloom): bloom
+            for idx, bloom in enumerate(bloom_levels_list)
+        }
+        for future in as_completed(futures):
+            batch = future.result()
+            if batch:
+                all_questions.extend(batch)
     
     for idx, q in enumerate(all_questions, start=1):
         q["question_number"] = idx
